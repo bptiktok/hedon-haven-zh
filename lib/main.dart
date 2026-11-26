@@ -9,7 +9,6 @@ import 'package:fvp/fvp.dart' as fvp;
 import 'package:material_ui/material_ui.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:rhttp/rhttp.dart';
-import 'package:secure_app_switcher/secure_app_switcher.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '/services/analytics_manager.dart';
@@ -179,19 +178,9 @@ class ViewerAppState extends State<ViewerApp> with WidgetsBindingObserver {
 
     initGlobalSetState(setStateMain);
 
-    // Hide app preview by default
-    // The desktops don't support app preview hiding at an OS level
-    if (Platform.isAndroid || Platform.isIOS) {
-      SecureAppSwitcher.on();
-    }
+    // 始终允许截图和录屏，不再设置 Android FLAG_SECURE。
     sharedStorage.getBool("privacy_hide_app_preview").then((value) {
-      if (!value!) {
-        // The desktops don't support app preview hiding at an OS level
-        if (Platform.isAndroid || Platform.isIOS) {
-          SecureAppSwitcher.off();
-        }
-      }
-      setState(() => hidePreview = value);
+      setState(() => hidePreview = false);
     });
     // For detecting app state
     WidgetsBinding.instance.addObserver(this);
