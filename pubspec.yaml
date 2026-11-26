@@ -48,7 +48,7 @@ dependencies:
   animations: ^3.0.0
   path: ^1.9.1
   synchronized: ^3.6.1+1
-  super_drag_and_drop: ^0.10.0-dev.2
+  super_drag_and_drop: ^0.1.9+3
   receive_sharing_intent: ^1.9.0
   rhttp: ^0.18.0
   material_ui: ^1.11.1
@@ -58,8 +58,7 @@ dependency_overrides:
   connectivity_plus: 7.0.0
   # newer version requires compileSdk 37, but rhttp needs 36 and flutterCompileSdk is also 36
   receive_sharing_intent: 1.8.1
-  # 1.0.6 的 Rust hook 无法解析 workspace 格式的 Cargo.toml（super_drag_and_drop 构建失败）
-  native_toolchain_rust: 1.1.1
+
 
 
 dev_dependencies:
