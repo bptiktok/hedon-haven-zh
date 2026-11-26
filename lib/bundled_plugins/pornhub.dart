@@ -138,6 +138,9 @@ class _PornhubIsolate extends BundledPluginIsolate {
     "KEY": ""
   };
 
+  /// 匿名访问登录页时建立的会话，登录请求必须沿用同一份 cookie。
+  String _guestCookies = "";
+
   /// 登录成功后由 set-cookie 得到的认证 cookie（例如 PHSESSID / ss / rememberme）。
   /// 以完整 "a=1; b=2" 形式保存，供所有请求附带。
   String _authCookies = "";
@@ -396,7 +399,8 @@ class _PornhubIsolate extends BundledPluginIsolate {
     // To be able to make search suggestion requests later, both a session cookie and a token are needed
     // Get the sessions cookie (called ss) from the response headers
     String? setCookies;
-    HttpResponse response = await httpRequest("https://www.pornhub.com");
+    HttpResponse response = await httpRequest("https://www.pornhub.com",
+        headers: {"Cookie": "platform=mobile; platform_forced=1"});
     if (response.statusCode != 200) {
       throw Exception("Failed to initialize plugin. "
           "Received status code ${response.statusCode}");
@@ -457,74 +461,174 @@ class _PornhubIsolate extends BundledPluginIsolate {
     _loggedInUser = username;
   }
 
-  /// 从 set-cookie 响应头中抽取并整理认证 cookie。
-  /// 只保留与登录会话相关的键，跳过 ss/KEY 等由 init 管理的会话键。
-  String _extractAuthCookies(String? setCookies) {
-    if (setCookies == null || setCookies.isEmpty) return "";
-    final skip = {"ss", "KEY", "token"};
-    final parts = setCookies
-        .split(",")
-        .expand((c) => c.split(";"))
-        .map((c) => c.trim())
-        .where((c) => c.contains("="))
-        .map((c) {
-      final name = c.split("=").first.trim();
-      return MapEntry(name, c);
-    });
-    final kept = <String>[];
-    for (final e in parts) {
-      if (skip.contains(e.key)) continue;
-      // 去掉常见的 path/domain/secure 等属性行
-      if (["path", "domain", "expires", "secure", "httponly", "samesite"]
-          .contains(e.key.toLowerCase())) continue;
-      if (!kept.contains(e.value)) kept.add(e.value);
+  /// 从 set-cookie 响应头提取 cookie 键值对，去掉 Path/Expires 等属性。
+  Map<String, String> _extractCookies(String? setCookies) {
+    final result = <String, String>{};
+    if (setCookies == null || setCookies.isEmpty) return result;
+    // 先按 Set-Cookie 行拆分；没有换行时按逗号后“名称=”的形式拆分。
+    final headers = setCookies.contains("\n")
+        ? setCookies.split(RegExp(r"\r?\n"))
+        : setCookies.split(RegExp(r",\s*(?=[^;,= ]+=)"));
+    for (final header in headers) {
+      final pair = header.split(";").first.trim();
+      final index = pair.indexOf("=");
+      if (index <= 0) continue;
+      final name = pair.substring(0, index).trim();
+      final value = pair.substring(index + 1).trim();
+      if (value.isNotEmpty && value.toLowerCase() != "deleted") {
+        result[name] = value;
+      }
     }
-    return kept.join("; ");
+    return result;
   }
 
-  /// 登录 Pornhub。成功返回 {"success": true, "username": ...}，失败返回错误信息。
-  /// 表单提交到 /login，并从 set-cookie 中保存认证 cookie。
+  Map<String, String> _parseCookieHeader(String value) {
+    final result = <String, String>{};
+    for (final part in value.split(";")) {
+      final index = part.indexOf("=");
+      if (index <= 0) continue;
+      result[part.substring(0, index).trim()] =
+          part.substring(index + 1).trim();
+    }
+    return result;
+  }
+
+  String _cookieHeader(Map<String, String> cookies) => cookies.entries
+      .where((e) => e.value.isNotEmpty)
+      .map((e) => "${e.key}=${e.value}")
+      .join("; ");
+
+  String _requestCookies() {
+    final cookies = <String, String>{
+      "platform": "mobile",
+      "platform_forced": "1",
+      if (_sessionCookies["ss"]?.isNotEmpty ?? false)
+        "ss": _sessionCookies["ss"]!,
+      if (_sessionCookies["KEY"]?.isNotEmpty ?? false)
+        "KEY": _sessionCookies["KEY"]!,
+      ..._parseCookieHeader(_guestCookies),
+      ..._parseCookieHeader(_authCookies),
+    };
+    return _cookieHeader(cookies);
+  }
+
+  String _rememberCookieHeader(String header) {
+    final cookies = _parseCookieHeader(header);
+    final pairs = cookies.entries.map((e) => "${e.key}=${e.value}").join(";");
+    return pairs;
+  }
+
+  String _plainText(Document document) => document.body?.text.trim() ?? "";
+
+  String _loginMessage(dynamic json) {
+    final message = json is Map ? json["message"] : null;
+    if (message is String && message.trim().isNotEmpty) {
+      return _plainText(parseFragment(message));
+    }
+    return "";
+  }
+
+  /// 登录 Pornhub。实际接口为 /front/authenticate，字段为 email/password。
   Future<Map<String, dynamic>> login(String username, String password) async {
     logInfo("Attempting login for $username");
-    final body = Uri(queryParameters: {
-      "user": username,
-      "pass": password,
-      "rememberme": "1",
-    }).query;
-
-    final response = await httpRequest(
-      "https://www.pornhub.com/login",
-      method: "POST",
-      body: body,
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Cookie": _authCookies.isNotEmpty
-            ? _authCookies
-            : "ss=${_sessionCookies['ss'] ?? ''}",
-      },
-    );
-
-    final auth = _extractAuthCookies(response.headers["set-cookie"]);
-    final respBody = response.body.toLowerCase();
-    // 登录失败的典型特征
-    final failed = auth.isEmpty ||
-        respBody.contains("wrong") ||
-        respBody.contains("incorrect") ||
-        respBody.contains("invalid username") ||
-        respBody.contains("login error");
-
-    if (failed) {
-      logWarning("Login failed for $username (status ${response.statusCode})");
+    const loginUrl = "https://www.pornhub.com/login";
+    final guest = _requestCookies();
+    final page = await httpRequest(loginUrl,
+        headers: {"Cookie": guest, "Referer": "https://www.pornhub.com/"});
+    if (page.statusCode != 200) {
       return {
         "success": false,
-        "message": "登录失败：用户名或密码错误，或网站拒绝了登录请求",
+        "message": "登录页加载失败（HTTP ${page.statusCode}），请检查网络或稍后重试",
       };
     }
 
-    _authCookies = auth;
+    final document = parse(page.body);
+    if (_plainText(document) == "Loading...") {
+      return {"success": false, "message": "站点正在进行访问验证，请稍后重试"};
+    }
+    final form = document.querySelector("form.js-loginForm") ??
+        document.querySelector("form.js-loginFormModal");
+    if (form == null) {
+      return {"success": false, "message": "站点登录页面结构已变化，请更新应用"};
+    }
+
+    final formData = <String, String>{};
+    for (final input in form.querySelectorAll("input[name]")) {
+      final name = input.attributes["name"];
+      if (name != null && name.isNotEmpty) {
+        formData[name] = input.attributes["value"] ?? "";
+      }
+    }
+    if (!formData.containsKey("token")) {
+      return {"success": false, "message": "未获取到登录令牌，请稍后重试"};
+    }
+    formData["email"] = username;
+    formData["password"] = password;
+
+    // GET 与 POST 使用同一组访客会话，并把认证响应的 cookie 保留下来。
+    var cookies = <String, String>{
+      ..._parseCookieHeader(guest),
+      ..._extractCookies(page.headers["set-cookie"]),
+      ..._extractCookies(page.headers["x-hedon-session-cookies"]),
+    };
+    _guestCookies = _rememberCookieHeader(_cookieHeader(cookies));
+
+    final response = await httpRequest(
+      "https://www.pornhub.com/front/authenticate",
+      method: "POST",
+      body: Uri(queryParameters: formData).query,
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        "Accept": "application/json, text/javascript, */*; q=0.01",
+        "Referer": loginUrl,
+        "Origin": "https://www.pornhub.com",
+        "X-Requested-With": "XMLHttpRequest",
+        "Cookie": _cookieHeader(cookies),
+      },
+    );
+
+    dynamic result;
+    try {
+      result = jsonDecode(response.body);
+    } catch (_) {
+      final text = _plainText(parseFragment(response.body));
+      return {
+        "success": false,
+        "message": response.statusCode == 200
+            ? "登录接口返回异常：${text.substring(0, text.length > 160 ? 160 : text.length)}"
+            : "登录请求被拒绝（HTTP ${response.statusCode}）",
+      };
+    }
+    if (result is! Map) {
+      return {"success": false, "message": "登录接口返回了无法识别的结果"};
+    }
+    final message = _loginMessage(result);
+    if (result["success"]?.toString() != "1") {
+      logWarning("Login rejected: $message");
+      return {
+        "success": false,
+        "message": message.isEmpty ? "登录未成功，请检查账号状态" : message,
+      };
+    }
+
+    cookies.addAll(_extractCookies(response.headers["set-cookie"]));
+    // 再请求首页验证登录已生效，避免将失效 cookie 当成成功。
+    final verify = await httpRequest(loginUrl,
+        headers: {"Cookie": _cookieHeader(cookies), "Referer": loginUrl});
+    final verifyDoc = parse(verify.body);
+    if (verifyDoc.querySelector("#profileMenuDropdown") == null &&
+        verifyDoc.querySelector(".ph-icon-logout") == null) {
+      return {
+        "success": false,
+        "message": "账号已通过验证，但会话未生效，请稍后重试",
+      };
+    }
+
+    _authCookies = _rememberCookieHeader(_cookieHeader(cookies));
+    _guestCookies = "";
     _loggedInUser = username;
     logInfo("Login successful for $username");
-    return {"success": true, "username": username, "cookies": auth};
+    return {"success": true, "username": username, "cookies": _authCookies};
   }
 
   /// 退出登录：清除认证 cookie 并请求站点登出以失效服务端会话。
