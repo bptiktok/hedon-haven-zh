@@ -1,0 +1,22 @@
+testingSearchSuggestions:
+  - query: "Compil"
+    expectedSuggestion: "Compilation"
+
+testingSearchResults:
+  - searchString: "Art"
+
+testingVideos:
+  # This is an older video
+  - videoID: "3260845"
+    progressThumbnailsAmount: 679
+  # This is a more recent video from the homepage
+  - videoID: "xhZiTRT"
+    progressThumbnailsAmount: 779
+
+testingAuthorPageIds:
+  # A channel-type author
+  - "vixen"
+  # A creator-type author
+  - "nerdy-nympho"
+  # A user-type author
+  - "sweetwifemarian"
