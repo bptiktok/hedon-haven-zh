@@ -409,7 +409,7 @@ class _BugReportScreenState extends State<BugReportScreen>
     }
 
     if (submittedBugReports.isNotEmpty && mounted) {
-      logger.i("Returning ${submittedBugReports.length} submitted 错误报告s");
+      logger.i("Returning ${submittedBugReports.length} submitted bug reports");
       showToast("感谢您提交错误报告！", context);
       Navigator.of(context).pop(submittedBugReports);
     }
