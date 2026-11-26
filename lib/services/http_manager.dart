@@ -56,9 +56,18 @@ Future<http.Client> getHttpClient(String? proxy) async {
 
           request = request.copyWith(headers: tempHeaders);
 
+          final safeHeaders = <String, String>{};
+          final rawHeaders = request.headers;
+          if (rawHeaders is HttpHeaderRawMap) {
+            rawHeaders.map.forEach((key, value) {
+              safeHeaders[key] = key.toLowerCase() == "cookie"
+                  ? "[会话已隐藏]"
+                  : value;
+            });
+          }
           logger.t("[HTTP][$requestId] type: ${request.method.value};"
               " URI: ${request.url};"
-              " headers: ${request.headers}");
+              " headers: $safeHeaders");
 
           return Interceptor.next(request);
         },
