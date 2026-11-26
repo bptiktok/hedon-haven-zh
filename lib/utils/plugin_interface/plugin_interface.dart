@@ -165,19 +165,76 @@ class PluginInterface {
   void _httpRequest(
       SendPort responseSendPort, Map<String, dynamic> args) async {
     try {
-      final method = (args["method"] as String?) ?? "GET";
-      final uri = Uri.parse(args["url"]);
-      final headers = (args["headers"] as Map?)?.cast<String, String>();
-      final body = args["body"] as String?;
-      final http.Response response = method == "POST"
-          ? await client.post(uri, headers: headers, body: body)
-          : await client.get(uri, headers: headers);
-      responseSendPort.send(HttpResponse(
-        statusCode: response.statusCode,
-        bodyBytes: response.bodyBytes,
-        body: response.body,
-        headers: response.headers,
-      ).toMap());
+      var method = (args["method"] as String?) ?? "GET";
+      var uri = Uri.parse(args["url"]);
+      final requestHeaders = <String, String>{
+        ...?(args["headers"] as Map?)?.cast<String, String>()
+      };
+      var body = args["body"] as String?;
+      final cookies = <String, String>{};
+      final responseHeaders = <String, String>{};
+
+      // 登录流程可能通过多次 302 设置会话。逐跳保存 cookie，避免只拿到
+      // 最终页面的响应头而丢失认证会话。
+      for (var redirect = 0; redirect < 9; redirect++) {
+        final request = http.Request(method, uri)
+          ..followRedirects = false
+          ..headers.addAll(requestHeaders);
+        if (body != null && method != "GET") request.body = body;
+        if (cookies.isNotEmpty) {
+          final previous = request.headers["cookie"];
+          final extra = cookies.entries
+              .where((e) =>
+                  previous == null || !previous.contains("${e.key}="))
+              .map((e) => "${e.key}=${e.value}")
+              .join("; ");
+          request.headers["cookie"] = previous == null || previous.isEmpty
+              ? extra
+              : "$previous; $extra";
+        }
+        final streamed = await client.send(request);
+        final response = await http.Response.fromStream(streamed);
+        responseHeaders.addAll(response.headers);
+        if (cookies.isNotEmpty) {
+          responseHeaders["x-hedon-session-cookies"] = cookies.entries
+              .map((e) => "${e.key}=${e.value}")
+              .join("; ");
+        }
+        final setCookie = response.headers["set-cookie"];
+        if (setCookie != null) {
+          for (final line in setCookie.split(RegExp(r"\r?\n"))) {
+            final pair = line.split(";").first;
+            final index = pair.indexOf("=");
+            if (index > 0) {
+              cookies[pair.substring(0, index).trim()] =
+                  pair.substring(index + 1).trim();
+            }
+          }
+          responseHeaders["set-cookie"] = setCookie;
+        }
+        final location = response.headers["location"];
+        if (location == null ||
+            response.statusCode < 300 ||
+            response.statusCode >= 400) {
+          responseSendPort.send(HttpResponse(
+            statusCode: response.statusCode,
+            bodyBytes: response.bodyBytes,
+            body: response.body,
+            headers: responseHeaders,
+          ).toMap());
+          return;
+        }
+        uri = uri.resolve(location);
+        if (response.statusCode == 301 ||
+            response.statusCode == 302 ||
+            response.statusCode == 303) {
+          method = "GET";
+          body = null;
+          requestHeaders.remove("content-type");
+          requestHeaders.remove("content-length");
+        }
+      }
+      throw Exception("Too many redirects");
     } catch (e) {
       responseSendPort.send(HttpResponse(
           statusCode: 0,
