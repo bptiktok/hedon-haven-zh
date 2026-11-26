@@ -10,7 +10,6 @@ import 'package:material_ui/material_ui.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 import 'package:rhttp/rhttp.dart';
 import 'package:secure_app_switcher/secure_app_switcher.dart';
-import 'package:super_drag_and_drop/super_drag_and_drop.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '/services/analytics_manager.dart';
@@ -166,8 +165,6 @@ class ViewerAppState extends State<ViewerApp> with WidgetsBindingObserver {
   /// This controls whether the preview should be currently blocked
   bool blockPreview = false;
 
-  /// Tracks the hash of the currently hovered drop
-  bool hoveringWithLink = false;
   int _selectedIndex = 0;
   static List<Widget> screenList = <Widget>[
     const HomeScreen(),
@@ -344,49 +341,6 @@ class ViewerAppState extends State<ViewerApp> with WidgetsBindingObserver {
     setState(() {});
   }
 
-  Future<void> handleDroppedLink(PerformDropEvent event) async {
-    final reader = event.session.items.first.dataReader!;
-
-    // Only accept http and https links, wherever the uri came from
-    void openIfValid(Uri? uri) {
-      if (uri != null && (uri.scheme == "https" || uri.scheme == "http")) {
-        logger.i("Received dropped link: $uri");
-        try {
-          handleExternalLink(uri, materialAppKey.currentState!.context);
-        } catch (e, st) {
-          logger.e("处理拖入链接失败：$e\n$st");
-          showToastViaOverlay("处理拖入链接失败：$e",
-              materialAppKey.currentState!.overlay!, 5);
-        }
-      } else {
-        logger.w("拖入的不是 http/https 链接");
-        showToastViaOverlay("拖入的不是 http/https 链接",
-            materialAppKey.currentState!.overlay!, 5);
-      }
-    }
-
-    reader.getValue(Formats.htmlText, (html) {
-      // Try extracting the link from the html anchor first (most reliable on Linux)
-      final href = RegExp(r'href="([^"]+)"').firstMatch(html ?? "")?.group(1);
-      if (href != null) {
-        openIfValid(Uri.tryParse(href));
-      } else {
-        // Fallback: no usable html link found, try plain text instead
-        reader.getValue(
-            Formats.plainText, (text) => openIfValid(Uri.tryParse(text ?? "")),
-            onError: (error) {
-          logger.e("读取拖入链接失败：$error");
-          showToastViaOverlay("读取拖入链接失败：$error",
-              materialAppKey.currentState!.overlay!, 5);
-        });
-      }
-    }, onError: (error) {
-      logger.e("读取拖入链接失败：$error");
-      showToastViaOverlay("读取拖入链接失败：$error",
-          materialAppKey.currentState!.overlay!, 5);
-    });
-  }
-
   Future<void> handleSharedLink(
       List<SharedMediaFile> sharedMediaFileList) async {
     for (var item in sharedMediaFileList) {
@@ -462,25 +416,7 @@ class ViewerAppState extends State<ViewerApp> with WidgetsBindingObserver {
                   ]);
                 },
                 */
-                home: DropRegion(
-                  // Formats this region can accept.
-                  formats: [Formats.htmlText, Formats.plainText],
-                  hitTestBehavior: HitTestBehavior.opaque,
-                  // Cannot properly test for https/http here due to callback nature of onDropOver
-                  onDropOver: (event) {
-                    return event.session.items.first
-                                .canProvide(Formats.htmlText) ||
-                            event.session.items.first
-                                .canProvide(Formats.plainText)
-                        ? DropOperation.copy
-                        : DropOperation.none;
-                  },
-                  onDropEnter: (event) =>
-                      setState(() => hoveringWithLink = true),
-                  onDropLeave: (event) =>
-                      setState(() => hoveringWithLink = false),
-                  onPerformDrop: (event) => handleDroppedLink(event),
-                  child: Stack(children: [
+                home: Stack(children: [
                     FutureBuilder<bool?>(
                         future: onboardingCompleted,
                         builder: (context, snapshotParent) {
@@ -523,8 +459,7 @@ class ViewerAppState extends State<ViewerApp> with WidgetsBindingObserver {
                         child: Container(color: Colors.black),
                       ),
                     ]
-                  ]),
-                ));
+                ]));
           });
     });
   }
@@ -583,38 +518,7 @@ class ViewerAppState extends State<ViewerApp> with WidgetsBindingObserver {
                       : Offset(entry.key < _selectedIndex ? -1.0 : 1.0, 0),
                   child: entry.value,
                 )),
-            if (hoveringWithLink) ...[
-              Positioned.fill(
-                // Fixes wrong colorScheme being used (wrong context)
-                child: Builder(
-                    builder: (context) => Container(
-                        color:
-                            Theme.of(context).colorScheme.surfaceContainerHigh,
-                        child: Padding(
-                            padding: EdgeInsets.all(100),
-                            child: Container(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .surfaceContainerHighest,
-                                child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.center,
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    spacing: 50,
-                                    children: [
-                                      Text("拖入以打开",
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .headlineLarge!
-                                              .copyWith(
-                                                  fontWeight: FontWeight.bold,
-                                                  color: Theme.of(context)
-                                                      .colorScheme
-                                                      .onSurface)),
-                                      Icon(Icons.open_in_browser, size: 70)
-                                    ]))))),
-              ),
-            ]
+
           ]),
         ));
   }
