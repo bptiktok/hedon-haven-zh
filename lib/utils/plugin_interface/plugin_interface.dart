@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:html/dom.dart';
 import 'package:yaml/yaml.dart';
 
@@ -164,10 +165,13 @@ class PluginInterface {
   void _httpRequest(
       SendPort responseSendPort, Map<String, dynamic> args) async {
     try {
-      final response = await client.get(
-        Uri.parse(args["url"]),
-        headers: (args["headers"] as Map?)?.cast<String, String>(),
-      );
+      final method = (args["method"] as String?) ?? "GET";
+      final uri = Uri.parse(args["url"]);
+      final headers = (args["headers"] as Map?)?.cast<String, String>();
+      final body = args["body"] as String?;
+      final http.Response response = method == "POST"
+          ? await client.post(uri, headers: headers, body: body)
+          : await client.get(uri, headers: headers);
       responseSendPort.send(HttpResponse(
         statusCode: response.statusCode,
         bodyBytes: response.bodyBytes,
@@ -461,4 +465,33 @@ class PluginInterface {
     list.networkTraces = call.networkTraces;
     return list;
   }
+
+  // --- 登录支持（仅支持登录的插件实现这些方法） ---
+
+  /// 插件是否支持登录。只有覆盖 login 函数的插件（例如 Pornhub）才支持。
+  bool get supportsLogin => false;
+
+  /// 用用户名和密码登录，返回 {"success": bool, "message"?: String, "cookies"?: String}。
+  Future<Map<String, dynamic>> login(String username, String password) async {
+    final call = await _callFunction("login", [username, password]);
+    return Map<String, dynamic>.from(call.result as Map);
+  }
+
+  /// 退出登录。
+  Future<Map<String, dynamic>> logout() async {
+    final call = await _callFunction("logout", []);
+    return Map<String, dynamic>.from(call.result as Map);
+  }
+
+  /// 当前登录状态：{"loggedIn": bool, "username": String}。
+  Future<Map<String, dynamic>> getLoginStatus() async {
+    final call = await _callFunction("getLoginStatus", []);
+    return Map<String, dynamic>.from(call.result as Map);
+  }
+
+  /// 在插件初始化后恢复持久化的登录会话。
+  Future<void> setLoginSession(String cookies, String username) async {
+    await _callFunction("setLoginSession", [cookies, username]);
+  }
+
 }
