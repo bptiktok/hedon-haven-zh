@@ -551,6 +551,7 @@ class _PluginsScreenState extends State<PluginsScreen> {
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  if (plugin.supportsLogin) buildLoginTile(plugin),
                   OptionsSwitch(
                       title: "搜索结果来源",
                       subTitle:
@@ -597,4 +598,110 @@ class _PluginsScreenState extends State<PluginsScreen> {
               ));
         });
   }
+
+  /// 账号登录入口（仅对 supportsLogin 的插件显示）
+  Widget buildLoginTile(PluginInterface plugin) {
+    return FutureBuilder<Map<String, dynamic>>(
+      future: plugin.getLoginStatus(),
+      builder: (context, snapshot) {
+        final bool loggedIn = snapshot.data?["loggedIn"] == true;
+        final String username = snapshot.data?["username"] ?? "";
+        return ListTile(
+          leading: Icon(loggedIn ? Icons.account_circle : Icons.login),
+          title: Text(loggedIn ? "已登录：$username" : "登录 ${plugin.prettyName}"),
+          subtitle: Text(loggedIn ? "点击管理登录状态" : "登录后可使用账号功能"),
+          trailing: const Icon(Icons.arrow_forward),
+          onTap: () => _showLoginDialog(context, plugin, loggedIn, username),
+        );
+      },
+    );
+  }
+
+  void _showLoginDialog(BuildContext context, PluginInterface plugin,
+      bool loggedIn, String username) async {
+    final userController =
+        TextEditingController(text: loggedIn ? username : "");
+    final passController = TextEditingController();
+    bool busy = false;
+    String? statusText;
+
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => ThemedDialog(
+          title: "账号登录",
+          primaryText: busy ? null : (loggedIn ? "退出登录" : "登录"),
+          onPrimary: loggedIn
+              ? () async {
+                  await plugin.logout();
+                  await sharedStorage.remove("login_cookies_${plugin.codeName}");
+                  await sharedStorage.remove("login_user_${plugin.codeName}");
+                  if (context.mounted) Navigator.pop(context);
+                  if (context.mounted) showToast("已退出登录", context);
+                }
+              : () async {
+                  if (userController.text.trim().isEmpty ||
+                      passController.text.isEmpty) {
+                    showToast("请输入用户名和密码", context);
+                    return;
+                  }
+                  setState(() => busy = true);
+                  try {
+                    final result = await plugin.login(
+                        userController.text.trim(), passController.text);
+                    if (result["success"] == true) {
+                      await sharedStorage.setString(
+                          "login_cookies_${plugin.codeName}",
+                          result["cookies"] ?? "");
+                      await sharedStorage.setString(
+                          "login_user_${plugin.codeName}",
+                          result["username"] ?? userController.text.trim());
+                      if (context.mounted) Navigator.pop(context);
+                      if (context.mounted) showToast("登录成功", context);
+                    } else {
+                      setState(() {
+                        busy = false;
+                        statusText = result["message"] ?? "登录失败";
+                      });
+                    }
+                  } catch (e) {
+                    setState(() {
+                      busy = false;
+                      statusText = "登录失败：$e";
+                    });
+                  }
+                },
+          secondaryText: "关闭",
+          onSecondary: () => Navigator.pop(context),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (loggedIn) Text("当前已登录：$username"),
+                if (!loggedIn) ...[
+                  TextField(
+                    controller: userController,
+                    decoration: const InputDecoration(
+                        labelText: "用户名", hintText: "邮箱或用户名"),
+                  ),
+                  TextField(
+                    controller: passController,
+                    obscureText: true,
+                    decoration: const InputDecoration(labelText: "密码"),
+                  ),
+                ],
+                if (busy)
+                  const Padding(
+                      padding: EdgeInsets.all(10),
+                      child: CircularProgressIndicator()),
+                if (statusText != null)
+                  Text(statusText!, style: const TextStyle(color: Colors.red)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
 }
