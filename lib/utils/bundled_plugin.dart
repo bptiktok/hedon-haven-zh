@@ -70,12 +70,14 @@ abstract class BundledPluginIsolate {
   /// call is automatically recorded as a [NetworkTrace] and sent back to
   /// the main isolate alongside the function's result
   Future<HttpResponse> httpRequest(String url,
-      {Map<String, String>? headers}) async {
+      {Map<String, String>? headers, String method = "GET", String? body}) async {
     final responsePort = ReceivePort();
     _fetchPort.send({
       "responsePort": responsePort.sendPort,
       "url": url,
       "headers": headers,
+      "method": method,
+      "body": body,
     });
     final response = await responsePort.first as Map<String, dynamic>;
     responsePort.close();
