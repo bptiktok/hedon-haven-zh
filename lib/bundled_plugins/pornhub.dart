@@ -26,6 +26,9 @@ class PornhubPlugin extends PluginInterface {
   String get prettyName => "Pornhub.com";
 
   @override
+  bool get supportsLogin => true;
+
+  @override
   String get developer => "Hedon Haven";
 
   @override
@@ -134,6 +137,15 @@ class _PornhubIsolate extends BundledPluginIsolate {
     "token": "",
     "KEY": ""
   };
+
+  /// 登录成功后由 set-cookie 得到的认证 cookie（例如 PHSESSID / ss / rememberme）。
+  /// 以完整 "a=1; b=2" 形式保存，供所有请求附带。
+  String _authCookies = "";
+
+  /// 登录状态：用户名（空表示未登录）。
+  String _loggedInUser = "";
+
+  bool get isLoggedIn => _loggedInUser.isNotEmpty;
 
   Future<List<UniversalVideoPreview>> _parseVideoList(List<Element> resultsList,
       {String? authorNamePassed, String? authorIDPassed}) async {
@@ -328,6 +340,13 @@ class _PornhubIsolate extends BundledPluginIsolate {
     }
     logDebug("_performGetRequest recurse count: $recurseCount");
 
+    // 已登录时，把认证 cookie 合并进请求（调用方传入的 Cookie 优先不重复）
+    if (_authCookies.isNotEmpty) {
+      final existing = headers["Cookie"] ?? "";
+      headers["Cookie"] =
+          existing.isEmpty ? _authCookies : "$existing; $_authCookies";
+    }
+
     // Add ss cookie with correct formatting depending on whether other cookies already exist
     headers["Cookie"] =
         "${headers["Cookie"] == "" ? "" : "${headers["Cookie"]}; "}ss=${_sessionCookies["ss"]}";
@@ -414,7 +433,118 @@ class _PornhubIsolate extends BundledPluginIsolate {
     if (_sessionCookies["token"] == null) {
       throw Exception("No token received or found; couldn't extract token");
     }
+
+    // 若主 isolate 传入了持久化的登录会话，恢复之
+    final restoredCookies = _pendingRestoredCookies;
+    if (restoredCookies != null && restoredCookies.isNotEmpty) {
+      _authCookies = restoredCookies;
+      _loggedInUser = _pendingRestoredUser ?? "";
+      _pendingRestoredCookies = null;
+      _pendingRestoredUser = null;
+      logInfo("Restored login session for $_loggedInUser");
+    }
   }
+
+  /// 主 isolate 在 init 之前写入、init 时恢复的登录会话。
+  String? _pendingRestoredCookies;
+  String? _pendingRestoredUser;
+
+  /// 由主 isolate 调用：设置要恢复的登录会话（在插件重新初始化时生效）。
+  void setLoginSession(String cookies, String username) {
+    _pendingRestoredCookies = cookies;
+    _pendingRestoredUser = username;
+    _authCookies = cookies;
+    _loggedInUser = username;
+  }
+
+  /// 从 set-cookie 响应头中抽取并整理认证 cookie。
+  /// 只保留与登录会话相关的键，跳过 ss/KEY 等由 init 管理的会话键。
+  String _extractAuthCookies(String? setCookies) {
+    if (setCookies == null || setCookies.isEmpty) return "";
+    final skip = {"ss", "KEY", "token"};
+    final parts = setCookies
+        .split(",")
+        .expand((c) => c.split(";"))
+        .map((c) => c.trim())
+        .where((c) => c.contains("="))
+        .map((c) {
+      final name = c.split("=").first.trim();
+      return MapEntry(name, c);
+    });
+    final kept = <String>[];
+    for (final e in parts) {
+      if (skip.contains(e.key)) continue;
+      // 去掉常见的 path/domain/secure 等属性行
+      if (["path", "domain", "expires", "secure", "httponly", "samesite"]
+          .contains(e.key.toLowerCase())) continue;
+      if (!kept.contains(e.value)) kept.add(e.value);
+    }
+    return kept.join("; ");
+  }
+
+  /// 登录 Pornhub。成功返回 {"success": true, "username": ...}，失败返回错误信息。
+  /// 表单提交到 /login，并从 set-cookie 中保存认证 cookie。
+  Future<Map<String, dynamic>> login(String username, String password) async {
+    logInfo("Attempting login for $username");
+    final body = Uri(queryParameters: {
+      "user": username,
+      "pass": password,
+      "rememberme": "1",
+    }).query;
+
+    final response = await httpRequest(
+      "https://www.pornhub.com/login",
+      method: "POST",
+      body: body,
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Cookie": _authCookies.isNotEmpty
+            ? _authCookies
+            : "ss=${_sessionCookies['ss'] ?? ''}",
+      },
+    );
+
+    final auth = _extractAuthCookies(response.headers["set-cookie"]);
+    final respBody = response.body.toLowerCase();
+    // 登录失败的典型特征
+    final failed = auth.isEmpty ||
+        respBody.contains("wrong") ||
+        respBody.contains("incorrect") ||
+        respBody.contains("invalid username") ||
+        respBody.contains("login error");
+
+    if (failed) {
+      logWarning("Login failed for $username (status ${response.statusCode})");
+      return {
+        "success": false,
+        "message": "登录失败：用户名或密码错误，或网站拒绝了登录请求",
+      };
+    }
+
+    _authCookies = auth;
+    _loggedInUser = username;
+    logInfo("Login successful for $username");
+    return {"success": true, "username": username, "cookies": auth};
+  }
+
+  /// 退出登录：清除认证 cookie 并请求站点登出以失效服务端会话。
+  Future<Map<String, dynamic>> logout() async {
+    logInfo("Logging out $_loggedInUser");
+    final cookies = _authCookies;
+    _authCookies = "";
+    _loggedInUser = "";
+    try {
+      await httpRequest("https://www.pornhub.com/logout",
+          headers: {"Cookie": cookies});
+    } catch (e) {
+      logWarning("Logout request failed: $e");
+    }
+    return {"success": true};
+  }
+
+  /// 返回当前登录状态。
+  Future<Map<String, dynamic>> getLoginStatus() async =>
+      {"loggedIn": isLoggedIn, "username": _loggedInUser};
 
   @override
   Future<ExternalLinkParsed> parseExternalLink(String uriAsString) async {
@@ -1280,4 +1410,20 @@ class _PornhubIsolate extends BundledPluginIsolate {
             parse(rawHtmlString).querySelector("h1")!.nodes.first.text!.trim(),
         authorIDPassed: authorID);
   }
+
+  @override
+  Map<String, Future<dynamic> Function(List args)> buildFunctionsMap() {
+    final map = super.buildFunctionsMap();
+    map.addAll({
+      "login": (args) async => login(args[0] as String, args[1] as String),
+      "logout": (args) async => logout(),
+      "getLoginStatus": (args) async => getLoginStatus(),
+      "setLoginSession": (args) async {
+        setLoginSession(args[0] as String, args[1] as String);
+        return {"success": true};
+      },
+    });
+    return map;
+  }
+
 }
