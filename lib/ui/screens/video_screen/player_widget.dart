@@ -87,6 +87,13 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     // Sort the available resolutions in ascending order
     sortedResolutions = widget.videoMetadata.m3u8Uris.keys.toList()..sort();
 
+    // 没有任何可用播放地址时直接报错，避免下面 sortedResolutions[0] 越界崩溃
+    if (sortedResolutions.isEmpty) {
+      setState(() => videoPlayerException =
+          Exception("无法播放视频：该视频没有可用的播放地址"));
+      return;
+    }
+
     if (widget.videoMetadata.m3u8Uris.length > 1) {
       // select the preferred quality, or the closest to it
 
@@ -106,7 +113,8 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget> {
     // Check if m3u8 links exist and display toast message
     if (widget.videoMetadata.m3u8Uris[selectedResolution] == null) {
       setState(() => videoPlayerException =
-          Exception("Couldn't play video: M3U8 url not found"));
+          Exception("无法播放视频：未找到 M3U8 地址"));
+      return;
     }
     initVideoController(widget.videoMetadata.m3u8Uris[selectedResolution]!);
   }
@@ -124,6 +132,7 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget> {
   }
 
   void initVideoController(Uri url) {
+    Timer? errorTimeout;
     final bool isPlaying = controller.value.isPlaying;
     final oldPosition = controller.value.position;
     logger.d("Old position: $oldPosition");
@@ -173,12 +182,20 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget> {
       }
 
       setState(() {});
+    }).catchError<void>((error) {
+      // fvp / video_player 打开不支持或失效的媒体时会抛 PlatformException
+      // (media open error)。在此捕获并展示错误界面，避免冒泡成全局崩溃。
+      errorTimeout?.cancel();
+      logger.e("视频播放器初始化失败: $error");
+      if (mounted) {
+        setState(() => videoPlayerException =
+            Exception("视频无法播放：$error"));
+      }
     });
 
     // video_player sometimes just silently fails to init
     // -> add a timeout that will show an error to the user if the video fails to init in 15 seconds
-    Timer? errorTimeout;
-    errorTimeout ??= Timer(const Duration(seconds: 10), () {
+    errorTimeout = Timer(const Duration(seconds: 10), () {
       if (!controller.value.isInitialized &&
           !controller.value.isBuffering &&
           controller.value.position == Duration.zero &&
