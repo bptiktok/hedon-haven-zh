@@ -220,7 +220,7 @@ Widget buildActorWidget(BuildContext context, void Function() openContainer,
                 fit: BoxFit.cover,
                 errorBuilder: (context, e, st) {
                   if (!e.toString().contains("mockAvatar")) {
-                    logger.e("Failed to load network avatar的相关视频： $e\n$st");
+                    logger.e("加载头像失败：$e\n$st");
                   }
                   return FittedBox(
                       fit: BoxFit.cover,
@@ -274,7 +274,7 @@ Widget buildAuthorWidget(BuildContext context, VideoPlayerScreenState vps) {
                           errorBuilder: (context, e, st) {
                             if (!e.toString().contains("mockAvatar")) {
                               logger
-                                  .e("Failed to load network avatar的相关视频： $e\n$st");
+                                  .e("加载头像失败：$e\n$st");
                             }
                             return FittedBox(
                                 fit: BoxFit.cover,
@@ -482,7 +482,7 @@ Widget buildTopLevelCommentSection(
                 : EdgeInsets.zero,
             child: Row(children: [
               Text(
-                  "评论（${vps.isLoading评论 ? "?" : vps.comments?.length ?? 0}) ",
+                  "评论（${vps.isLoadingComments ? "?" : vps.comments?.length ?? 0}) ",
                   style: Theme.of(context).textTheme.titleLarge!.copyWith(
                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                       fontWeight: FontWeight.w500)),
@@ -599,7 +599,7 @@ Widget buildReplyCommentSection(BuildContext context,
                           color:
                               Theme.of(context).colorScheme.onSurfaceVariant)),
                   Text(
-                      "回复（${topLevelComment.reply评论?.length ?? "暂无回复？"})",
+                      "回复（${topLevelComment.replyComments?.length ?? "暂无回复？"})",
                       style: Theme.of(context).textTheme.titleLarge!.copyWith(
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
                           fontWeight: FontWeight.w500)),
