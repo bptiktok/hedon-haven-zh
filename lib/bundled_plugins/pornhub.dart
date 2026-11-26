@@ -518,7 +518,7 @@ class _PornhubIsolate extends BundledPluginIsolate {
     return pairs;
   }
 
-  String _plainText(Node node) => node.text.trim();
+  String _plainText(Node node) => (node.text ?? "").trim();
 
   String _loginMessage(dynamic json) {
     final message = json is Map ? json["message"] : null;
