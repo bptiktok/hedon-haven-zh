@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:material_ui/material_ui.dart';
-import 'package:secure_app_switcher/secure_app_switcher.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '/ui/utils/toast_notification.dart';
@@ -36,22 +35,14 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                             sharedStorage.getBool("privacy_hide_app_preview"),
                         builder: (context, snapshot) {
                           return OptionsSwitch(
-                              title: "隐藏应用预览",
-                              subTitle: "在多任务切换器中隐藏应用预览",
-                              switchState: snapshot.data ?? true,
+                              title: "允许截图和录屏",
+                              subTitle: "此版本始终允许系统截图和录屏",
+                              switchState: false,
                               onToggled: (value) async {
                                 await sharedStorage.setBool(
-                                    "privacy_hide_app_preview", value);
-                                // Force an immediate update
-                                if (Platform.isAndroid || Platform.isIOS) {
-                                  if (!value) {
-                                    SecureAppSwitcher.off();
-                                  } else {
-                                    SecureAppSwitcher.on();
-                                  }
-                                }
-                                // the hidePreview var is from main.dart
-                                setState(() => hidePreview = value);
+                                    "privacy_hide_app_preview", false);
+                                setState(() => hidePreview = false);
+                                showToast("此版本始终允许截图和录屏", context);
                               });
                         }),
                     FutureBuilder<bool?>(
