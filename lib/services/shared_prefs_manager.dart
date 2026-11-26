@@ -132,7 +132,7 @@ Future<void> _setHistorySettings() async {
 Future<void> _setPrivacySettings() async {
   await sharedStorage.setBool("privacy_proxy_enabled", false);
   await sharedStorage.setString("privacy_proxy_address", "");
-  await sharedStorage.setBool("privacy_hide_app_preview", true);
+  await sharedStorage.setBool("privacy_hide_app_preview", false);
   await sharedStorage.setBool("privacy_keyboard_incognito_mode", true);
   await sharedStorage.setBool("privacy_show_external_link_warning", true);
 }
