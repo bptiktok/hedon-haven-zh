@@ -41,7 +41,7 @@ late StreamController<int> pluginUpdatesAvailableEvent;
 late void Function() globalSetState;
 
 /// This stores the global setting of whether the preview should be hidden
-bool hidePreview = true;
+bool hidePreview = false;
 
 // Make this bool a global var, -> user only sees the warning once per session
 bool thirdPartyPluginWarningShown = false;
