@@ -235,6 +235,21 @@ class PluginManager {
 
     try {
       await plugin.init(pluginCacheDir.path);
+      // 恢复持久化的登录会话（若插件支持登录且之前登录过）
+      if (plugin.supportsLogin) {
+        final cookies = await sharedStorage.getString(
+            "login_cookies_${plugin.codeName}");
+        final username = await sharedStorage.getString(
+            "login_user_${plugin.codeName}");
+        if (cookies != null && cookies.isNotEmpty) {
+          try {
+            await plugin.setLoginSession(cookies, username ?? "");
+            logger.i("Restored login session for ${plugin.codeName}");
+          } catch (e) {
+            logger.w("Failed to restore login session: $e");
+          }
+        }
+      }
     } catch (e, st) {
       logger.e("Failed to initiate ${plugin.codeName} plugin: $e\n$st");
       _failedPlugins[plugin] = (e, st.toString());
