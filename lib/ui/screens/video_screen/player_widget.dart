@@ -182,7 +182,7 @@ class VideoPlayerWidgetState extends State<VideoPlayerWidget> {
       }
 
       setState(() {});
-    }).catchError<void>((error) {
+    }).catchError((error) {
       // fvp / video_player 打开不支持或失效的媒体时会抛 PlatformException
       // (media open error)。在此捕获并展示错误界面，避免冒泡成全局崩溃。
       errorTimeout?.cancel();
